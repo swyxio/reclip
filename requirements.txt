@@ -1,2 +1,4 @@
 flask
+gunicorn
+requests
 yt-dlp[default,curl-cffi]

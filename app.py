@@ -6,8 +6,10 @@ import subprocess
 import threading
 from urllib.parse import urlparse
 from flask import Flask, request, jsonify, send_file, render_template
+from agent_console import agent_console
 
 app = Flask(__name__)
+app.register_blueprint(agent_console)
 DOWNLOAD_DIR = os.path.join(os.path.dirname(__file__), "downloads")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 

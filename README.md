@@ -16,9 +16,10 @@ https://github.com/user-attachments/assets/419d3e50-c933-444b-8cab-a9724986ba05
 - Quality/resolution picker
 - Bulk downloads — paste multiple URLs at once
 - Advanced request strategies for sites that reject generic server requests
+- Optional admin agent console for proposing app changes and creating GitHub PRs
 - Automatic URL deduplication
-- Clean, responsive UI — no frameworks, no build step
-- Single Python file backend (~150 lines)
+- Clean, responsive UI — no frontend framework
+- Small Flask backend with a Node-based Codex SDK worker for admin tasks
 
 ## Quick Start
 
@@ -36,6 +37,33 @@ Or with Docker:
 ```bash
 docker build -t reclip . && docker run -p 8899:8899 reclip
 ```
+
+## Admin Agent Console
+
+ReClip can expose a token-protected `/admin` console that runs Codex against a temporary checkout of this repo, shows the resulting diff, and creates a same-repo GitHub pull request only after you approve it in the UI.
+
+Required environment variables:
+
+```bash
+ADMIN_TOKEN=choose-a-long-random-token
+GITHUB_TOKEN=github-token-with-contents-write-and-pull-request-access
+GITHUB_REPO=swyxio/reclip
+OPENAI_API_KEY=...
+# or CODEX_API_KEY=...
+# or CODEX_ACCESS_TOKEN=...
+```
+
+Optional environment variables:
+
+```bash
+GITHUB_BASE_BRANCH=main
+CODEX_MODEL=...
+CODEX_REASONING_EFFORT=medium
+AGENT_TIMEOUT_SECONDS=900
+MAX_ACTIVE_AGENT_JOBS=1
+```
+
+The console does not expose a raw shell. It clones the configured GitHub repo into a temp directory, runs Codex with `workspace-write` sandboxing and no network access for the agent, allowlists changed paths, then pushes a branch and opens a PR after admin approval. Do not commit these tokens to the repo; configure them in your host or Railway service variables.
 
 ## Usage
 

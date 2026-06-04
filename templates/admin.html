@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ReClip Admin Agent</title>
+  <style>
+    :root {
+      --ink: #333;
+      --muted: #9b9489;
+      --line: #dfd8cf;
+      --paper: #fffdfa;
+      --accent: #ef542c;
+      --danger: #c9373d;
+      --ok: #217a4f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(circle at top left, #f8f4ee 0, #f7f0e7 48%, #f3eadf 100%);
+      color: var(--ink);
+      font: 16px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+    main {
+      width: min(1060px, calc(100vw - 32px));
+      margin: 48px auto;
+    }
+    h1 {
+      font-family: Georgia, serif;
+      font-weight: 400;
+      font-size: clamp(42px, 7vw, 76px);
+      margin: 0 0 8px;
+    }
+    h1 span { color: var(--accent); font-style: italic; }
+    .subtitle, label, .hint { color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    .card {
+      background: rgba(255, 253, 250, 0.86);
+      border: 2px solid var(--line);
+      border-radius: 24px;
+      padding: 24px;
+      margin-top: 24px;
+      box-shadow: 0 20px 80px rgba(68, 49, 28, 0.08);
+    }
+    label { display: block; margin: 18px 0 8px; font-size: 13px; }
+    input, textarea {
+      width: 100%;
+      border: 2px solid var(--line);
+      border-radius: 14px;
+      background: white;
+      color: var(--ink);
+      font: inherit;
+      padding: 14px 16px;
+    }
+    textarea { min-height: 170px; resize: vertical; }
+    button {
+      border: 0;
+      border-radius: 14px;
+      background: var(--accent);
+      color: white;
+      font: inherit;
+      font-weight: 700;
+      padding: 14px 20px;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    button.secondary { background: #2f2e2c; }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 18px; }
+    .pill {
+      display: inline-block;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 5px 10px;
+      color: var(--muted);
+      margin: 4px 8px 4px 0;
+      font-size: 13px;
+    }
+    .pill.ok { color: var(--ok); border-color: rgba(33, 122, 79, 0.35); }
+    .pill.bad { color: var(--danger); border-color: rgba(201, 55, 61, 0.35); }
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #292827;
+      color: #f7efe6;
+      border-radius: 18px;
+      padding: 18px;
+      max-height: 520px;
+      overflow: auto;
+      font-size: 13px;
+    }
+    .diff {
+      background: white;
+      color: var(--ink);
+      border: 2px solid var(--line);
+    }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Re<span>Clip</span> Agent</h1>
+    <div class="subtitle">Propose app changes from a sandboxed temp checkout, then approve a GitHub PR.</div>
+
+    <section class="card">
+      <div>
+        <span class="pill {{ 'ok' if configured.adminToken else 'bad' }}">ADMIN_TOKEN {{ 'set' if configured.adminToken else 'missing' }}</span>
+        <span class="pill {{ 'ok' if configured.githubToken else 'bad' }}">GITHUB_TOKEN {{ 'set' if configured.githubToken else 'missing' }}</span>
+        <span class="pill {{ 'ok' if configured.codexCredential else 'bad' }}">Codex credential {{ 'set' if configured.codexCredential else 'missing' }}</span>
+        <span class="pill">Repo {{ configured.githubRepo }}</span>
+      </div>
+
+      <label for="token">Admin token</label>
+      <input id="token" type="password" autocomplete="off" placeholder="Bearer token for this console">
+
+      <label for="prompt">Agent request</label>
+      <textarea id="prompt" placeholder="Describe the change you want Codex to make to ReClip..."></textarea>
+
+      <label for="commit">Commit / PR title</label>
+      <input id="commit" value="Agent proposal from ReClip admin console">
+
+      <div class="row">
+        <button id="run">Start Agent Job</button>
+        <button id="approve" class="secondary" disabled>Approve PR</button>
+        <span id="status" class="hint">Idle</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <label>Job Log</label>
+      <pre id="log">No job yet.</pre>
+
+      <label>Diff Preview</label>
+      <pre id="diff" class="diff">Diff will appear here before PR creation.</pre>
+    </section>
+  </main>
+
+  <script>
+    const tokenInput = document.getElementById('token');
+    const promptInput = document.getElementById('prompt');
+    const commitInput = document.getElementById('commit');
+    const runButton = document.getElementById('run');
+    const approveButton = document.getElementById('approve');
+    const statusEl = document.getElementById('status');
+    const logEl = document.getElementById('log');
+    const diffEl = document.getElementById('diff');
+    let activeJobId = null;
+    let pollTimer = null;
+
+    tokenInput.value = localStorage.getItem('reclipAdminToken') || '';
+    tokenInput.addEventListener('input', () => localStorage.setItem('reclipAdminToken', tokenInput.value));
+
+    function headers() {
+      return {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${tokenInput.value}`,
+      };
+    }
+
+    function renderJob(job) {
+      statusEl.textContent = `Status: ${job.status}`;
+      logEl.textContent = (job.events || [])
+        .map((event) => `[${event.time}] ${event.type}: ${event.message}`)
+        .join('\n') || 'Waiting for output...';
+      diffEl.textContent = job.diff || job.error || 'Diff will appear here before PR creation.';
+      approveButton.disabled = job.status !== 'awaiting_approval';
+      if (job.pr_url) {
+        statusEl.innerHTML = `PR created: <a href="${job.pr_url}" target="_blank" rel="noreferrer">${job.pr_url}</a>`;
+      }
+      if (['awaiting_approval', 'pr_created', 'error'].includes(job.status) && pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    }
+
+    async function api(path, options = {}) {
+      const response = await fetch(path, { ...options, headers: { ...headers(), ...(options.headers || {}) } });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `Request failed: ${response.status}`);
+      return data;
+    }
+
+    async function pollJob() {
+      if (!activeJobId) return;
+      try {
+        renderJob(await api(`/api/admin/jobs/${activeJobId}`));
+      } catch (error) {
+        statusEl.textContent = error.message;
+      }
+    }
+
+    runButton.addEventListener('click', async () => {
+      runButton.disabled = true;
+      approveButton.disabled = true;
+      logEl.textContent = 'Starting...';
+      diffEl.textContent = 'Diff will appear here before PR creation.';
+      try {
+        const data = await api('/api/admin/jobs', {
+          method: 'POST',
+          body: JSON.stringify({
+            prompt: promptInput.value,
+            commit_message: commitInput.value,
+          }),
+        });
+        activeJobId = data.job_id;
+        statusEl.textContent = `Queued ${activeJobId}`;
+        pollTimer = setInterval(pollJob, 1500);
+        await pollJob();
+      } catch (error) {
+        statusEl.textContent = error.message;
+        logEl.textContent = error.stack || error.message;
+      } finally {
+        runButton.disabled = false;
+      }
+    });
+
+    approveButton.addEventListener('click', async () => {
+      if (!activeJobId) return;
+      approveButton.disabled = true;
+      statusEl.textContent = 'Creating PR...';
+      try {
+        const data = await api(`/api/admin/jobs/${activeJobId}/approve-pr`, { method: 'POST' });
+        statusEl.innerHTML = `PR created: <a href="${data.pr_url}" target="_blank" rel="noreferrer">${data.pr_url}</a>`;
+        await pollJob();
+      } catch (error) {
+        statusEl.textContent = error.message;
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+{
+  "name": "reclip",
+  "version": "1.0.0",
+  "description": "A self-hosted, open-source video and audio downloader with a clean web UI. Paste links from YouTube, TikTok, Instagram, Twitter/X, and 1000+ other sites — download as MP4 or MP3.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/swyxio/reclip.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/swyxio/reclip/issues"
+  },
+  "homepage": "https://github.com/swyxio/reclip#readme",
+  "dependencies": {
+    "@openai/codex-sdk": "0.137.0"
+  }
+}
