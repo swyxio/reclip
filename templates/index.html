@@ -141,6 +141,122 @@
     .fetch-btn:active { transform: scale(0.98); }
     .fetch-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
+    .advanced {
+      margin: 10px 0 6px;
+      border: 1.5px solid var(--card-border);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.55);
+      overflow: hidden;
+    }
+    .advanced summary {
+      padding: 10px 14px;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 0.7rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      user-select: none;
+    }
+    .advanced[open] summary {
+      border-bottom: 1.5px solid var(--card-border);
+      color: var(--fg);
+    }
+    .advanced-body {
+      display: grid;
+      gap: 10px;
+      padding: 12px 14px 14px;
+    }
+    .field-label {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 0.66rem;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    select,
+    .headers-input {
+      width: 100%;
+      border: 1.5px solid var(--card-border);
+      border-radius: 9px;
+      background: var(--card);
+      color: var(--fg);
+      font-family: 'DM Mono', monospace;
+      font-size: 0.74rem;
+      outline: none;
+    }
+    select {
+      padding: 9px 10px;
+    }
+    .headers-input {
+      min-height: 76px;
+      padding: 10px;
+      resize: vertical;
+      margin-bottom: 0;
+    }
+    select:focus,
+    .headers-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(232, 93, 42, 0.08);
+    }
+    .advanced-hint {
+      font-size: 0.64rem;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .profile-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .profile-btn {
+      padding: 8px 12px;
+      border: 1.5px solid var(--card-border);
+      border-radius: 8px;
+      background: var(--card);
+      color: var(--fg);
+      font-family: 'DM Mono', monospace;
+      font-size: 0.66rem;
+      cursor: pointer;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      transition: border-color 0.2s, color 0.2s;
+    }
+    .profile-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .profile-status {
+      font-size: 0.63rem;
+      color: var(--muted);
+    }
+    .profile-check {
+      display: flex;
+      gap: 6px;
+      align-items: flex-start;
+      color: var(--muted);
+      font-size: 0.63rem;
+      line-height: 1.35;
+    }
+    .profile-check input {
+      margin-top: 1px;
+      accent-color: var(--accent);
+    }
+    .profile-preview {
+      display: none;
+      padding: 9px 10px;
+      border: 1.5px solid var(--card-border);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.65);
+      color: var(--muted);
+      font-size: 0.62rem;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .profile-preview.visible { display: block; }
+
     /* Cards */
     .cards { margin-top: 24px; }
 
@@ -343,6 +459,13 @@
     .dl-all-btn:hover { background: #2d2d2a; }
     .dl-all-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+    .strategy-note {
+      font-size: 0.63rem;
+      color: var(--muted);
+      margin-top: 2px;
+      word-break: break-word;
+    }
+
     .spin {
       display: inline-block;
       width: 10px; height: 10px;
@@ -377,6 +500,7 @@
       .card-title { white-space: normal; }
       .controls { flex-wrap: wrap; }
       .fetch-btn { width: 100%; }
+      .advanced-body { padding: 10px 12px 12px; }
     }
   </style>
 </head>
@@ -398,6 +522,37 @@
       <button class="fetch-btn" id="goBtn" onclick="go()">Fetch</button>
     </div>
 
+    <details class="advanced">
+      <summary>Advanced request strategy</summary>
+      <div class="advanced-body">
+        <label>
+          <span class="field-label">Strategy</span>
+          <select id="strategy">
+            <option value="auto">Auto: try several strategies</option>
+            <option value="default">Default yt-dlp</option>
+            <option value="browser">Desktop browser headers</option>
+            <option value="mobile">Mobile browser headers</option>
+            <option value="referer">Same-site referer</option>
+            <option value="impersonate">Chrome TLS impersonation</option>
+          </select>
+        </label>
+        <label>
+          <span class="field-label">Custom headers</span>
+          <textarea class="headers-input" id="headers" rows="3" placeholder="Referer: https://example.com/&#10;Origin: https://example.com"></textarea>
+        </label>
+        <div class="profile-actions">
+          <button class="profile-btn" type="button" onclick="captureBrowserProfile()">Use my browser profile</button>
+          <span class="profile-status" id="profileStatus">Adds UA, language, and client-hint headers.</span>
+        </div>
+        <label class="profile-check">
+          <input type="checkbox" id="highEntropyHints">
+          <span>Include experimental high-entropy Client Hints. Leave off unless the target is checking exact browser version/platform details.</span>
+        </label>
+        <div class="profile-preview" id="profilePreview"></div>
+        <p class="advanced-hint">Use this for sites that reject generic server requests. It will not bypass DRM, paywalls, private media, or account-only access.</p>
+      </div>
+    </details>
+
     <div id="cards" class="cards"></div>
 
     <div class="footer">
@@ -410,6 +565,7 @@
   <script>
     let currentFormat = 'video';
     let cardData = [];
+    let capturedProfile = null;
 
     function setFormat(btn) {
       document.querySelectorAll('.pill').forEach(b => b.classList.remove('active'));
@@ -435,6 +591,8 @@
     }
 
     function friendlyError(err) {
+      if (!err) return 'Unknown error';
+      if (err.includes('All strategies failed')) return 'All request strategies failed';
       if (err.includes('Unsupported URL')) return 'This URL is not supported';
       if (err.includes('Video unavailable')) return 'Video is unavailable or private';
       if (err.includes('Private video')) return 'This video is private';
@@ -445,6 +603,125 @@
       if (err.includes('timed out') || err.includes('Timed out')) return 'Request timed out — try again';
       if (err.includes('network') || err.includes('Network')) return 'Network error — check your connection';
       return err.length > 80 ? err.slice(0, 80) + '...' : err;
+    }
+
+    function requestOptions() {
+      return {
+        strategy: document.getElementById('strategy').value,
+        headers: document.getElementById('headers').value,
+      };
+    }
+
+    function q(value) {
+      return `"${String(value).replaceAll('"', '\\"')}"`;
+    }
+
+    function formatAcceptLanguage(languages) {
+      const unique = [...new Set((languages || []).filter(Boolean))];
+      if (!unique.length) return '';
+      return unique.map((lang, i) => i === 0 ? lang : `${lang};q=${Math.max(0.1, 1 - (i * 0.1)).toFixed(1)}`).join(',');
+    }
+
+    function formatBrands(brands) {
+      return (brands || [])
+        .filter(b => b.brand && b.version)
+        .map(b => `${q(b.brand)};v=${q(b.version)}`)
+        .join(', ');
+    }
+
+    function upsertHeaderLines(existing, additions) {
+      const next = new Map();
+      existing.split(/\n+/).map(line => line.trim()).filter(Boolean).forEach(line => {
+        const idx = line.indexOf(':');
+        if (idx > 0) next.set(line.slice(0, idx).trim().toLowerCase(), line);
+      });
+      additions.forEach(line => {
+        const idx = line.indexOf(':');
+        if (idx > 0) next.set(line.slice(0, idx).trim().toLowerCase(), line);
+      });
+      return [...next.values()].join('\n');
+    }
+
+    function browserProfileHeaders(profile, includeHighEntropy) {
+      const headers = [];
+      if (profile.userAgent) headers.push(`User-Agent: ${profile.userAgent}`);
+
+      const acceptLanguage = formatAcceptLanguage(profile.languages);
+      if (acceptLanguage) headers.push(`Accept-Language: ${acceptLanguage}`);
+
+      const brands = formatBrands(profile.brands);
+      if (brands) headers.push(`Sec-CH-UA: ${brands}`);
+      if (typeof profile.mobile === 'boolean') headers.push(`Sec-CH-UA-Mobile: ?${profile.mobile ? '1' : '0'}`);
+      if (profile.platform) headers.push(`Sec-CH-UA-Platform: ${q(profile.platform)}`);
+
+      if (includeHighEntropy) {
+        const fullVersionBrands = formatBrands(profile.fullVersionList);
+        if (fullVersionBrands) headers.push(`Sec-CH-UA-Full-Version-List: ${fullVersionBrands}`);
+        if (profile.architecture) headers.push(`Sec-CH-UA-Arch: ${q(profile.architecture)}`);
+        if (profile.bitness) headers.push(`Sec-CH-UA-Bitness: ${q(profile.bitness)}`);
+        if (profile.platformVersion) headers.push(`Sec-CH-UA-Platform-Version: ${q(profile.platformVersion)}`);
+        if (profile.uaFullVersion) headers.push(`Sec-CH-UA-Full-Version: ${q(profile.uaFullVersion)}`);
+        if (profile.model) headers.push(`Sec-CH-UA-Model: ${q(profile.model)}`);
+      }
+      return headers;
+    }
+
+    function renderProfilePreview(profile, headers, includeHighEntropy) {
+      const preview = document.getElementById('profilePreview');
+      const status = document.getElementById('profileStatus');
+      const observedOnly = [
+        profile.timeZone ? `Timezone: ${profile.timeZone}` : '',
+        profile.screen ? `Screen: ${profile.screen}` : '',
+        profile.hardwareConcurrency ? `CPU threads: ${profile.hardwareConcurrency}` : '',
+        profile.deviceMemory ? `Memory: ${profile.deviceMemory} GB` : '',
+        profile.fullVersionList?.length && !includeHighEntropy ? `Full version hints available: ${formatBrands(profile.fullVersionList)}` : '',
+      ].filter(Boolean);
+      preview.textContent = [
+        'Headers added:',
+        ...headers.map(h => `  ${h}`),
+        '',
+        'Observed only (not sent to yt-dlp):',
+        ...(observedOnly.length ? observedOnly.map(v => `  ${v}`) : ['  none']),
+      ].join('\n');
+      preview.classList.add('visible');
+      status.textContent = `${headers.length} header${headers.length === 1 ? '' : 's'} added from this browser.`;
+    }
+
+    async function captureBrowserProfile() {
+      const uaData = navigator.userAgentData;
+      const profile = {
+        userAgent: navigator.userAgent,
+        languages: navigator.languages?.length ? navigator.languages : [navigator.language].filter(Boolean),
+        platform: uaData?.platform || navigator.platform,
+        mobile: uaData?.mobile,
+        brands: uaData?.brands || [],
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        screen: `${window.screen.width}x${window.screen.height} @${window.devicePixelRatio || 1}x`,
+        hardwareConcurrency: navigator.hardwareConcurrency,
+        deviceMemory: navigator.deviceMemory,
+      };
+
+      const includeHighEntropy = document.getElementById('highEntropyHints').checked;
+      if (uaData?.getHighEntropyValues) {
+        try {
+          Object.assign(profile, await uaData.getHighEntropyValues([
+            'architecture',
+            'bitness',
+            'fullVersionList',
+            'model',
+            'platformVersion',
+            'uaFullVersion',
+          ]));
+        } catch {
+          // Low-entropy headers are still useful when high-entropy hints are unavailable.
+        }
+      }
+
+      const headers = browserProfileHeaders(profile, includeHighEntropy);
+      const headersInput = document.getElementById('headers');
+      headersInput.value = upsertHeaderLines(headersInput.value, headers);
+      capturedProfile = profile;
+      renderProfilePreview(profile, headers, includeHighEntropy);
     }
 
     document.getElementById('urls').addEventListener('keydown', e => {
@@ -461,6 +738,7 @@
       btn.textContent = 'Loading...';
       container.innerHTML = '';
       cardData = [];
+      const options = requestOptions();
 
       for (let i = 0; i < urls.length; i++) {
         const url = urls[i];
@@ -472,7 +750,7 @@
           const res = await fetch('/api/info', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url }),
+            body: JSON.stringify({ url, ...options }),
           });
           const data = await res.json();
           if (data.error) {
@@ -487,6 +765,7 @@
               uploader: data.uploader || '',
               formats: data.formats || [],
               selectedFormatId: data.formats?.[0]?.id || null,
+              strategy: data.strategy || options.strategy,
             };
           }
         } catch (err) {
@@ -538,6 +817,7 @@
           <div class="card-body">
             <div class="card-title" style="color:var(--error)">Could not fetch video</div>
             <div class="card-error-msg">${esc(friendlyError(c.error || ''))}</div>
+            <div class="strategy-note">${esc(c.error || '')}</div>
             <div class="card-error-url">${esc(c.url)}</div>
           </div>
         `;
@@ -579,9 +859,10 @@
 
       el.innerHTML = `
         <div class="card-thumb">${thumbHtml}</div>
-        <div class="card-body">
+          <div class="card-body">
           <div class="card-title">${esc(c.title || 'Untitled')}</div>
           <div class="card-meta">${esc(c.uploader)}${c.duration ? ' · ' + fmtDur(c.duration) : ''}</div>
+          ${c.strategy ? `<div class="strategy-note">Strategy: ${esc(c.strategy)}</div>` : ''}
           <div class="card-actions">${actionHtml}</div>
         </div>
       `;
@@ -605,8 +886,10 @@
 
     async function dlCard(idx) {
       const c = cardData[idx];
+      const options = requestOptions();
       c.status = 'downloading';
       c.error = null;
+      c.strategy = options.strategy;
       renderCard(idx);
 
       try {
@@ -618,6 +901,7 @@
             format: currentFormat,
             format_id: c.selectedFormatId,
             title: c.title || '',
+            ...options,
           }),
         });
         const data = await res.json();
@@ -628,6 +912,7 @@
           return;
         }
         c.jobId = data.job_id;
+        c.strategy = data.strategy || options.strategy;
         pollCard(idx);
       } catch (err) {
         c.status = 'error';
@@ -646,12 +931,14 @@
             clearInterval(iv);
             c.status = 'done';
             c.filename = data.filename;
+            c.strategy = data.strategy || c.strategy;
             renderCard(idx);
             saveCard(idx);
           } else if (data.status === 'error') {
             clearInterval(iv);
             c.status = 'error';
             c.error = data.error;
+            c.strategy = data.strategy || c.strategy;
             renderCard(idx);
           }
         } catch {

@@ -15,6 +15,7 @@ https://github.com/user-attachments/assets/419d3e50-c933-444b-8cab-a9724986ba05
 - MP4 video or MP3 audio extraction
 - Quality/resolution picker
 - Bulk downloads — paste multiple URLs at once
+- Advanced request strategies for sites that reject generic server requests
 - Automatic URL deduplication
 - Clean, responsive UI — no frameworks, no build step
 - Single Python file backend (~150 lines)
@@ -43,6 +44,8 @@ docker build -t reclip . && docker run -p 8899:8899 reclip
 3. Click **Fetch** to load video info and thumbnails
 4. Select quality/resolution if available
 5. Click **Download** on individual videos, or **Download All**
+
+If a site returns 403/access-denied for generic server requests, open **Advanced request strategy** and try **Auto**, browser/mobile headers, same-site referer, Chrome TLS impersonation, or custom `Header: value` lines. You can also click **Use my browser profile** to fill headers from your current browser's user agent, language, and Client Hints. These options only tune request metadata; they do not bypass DRM, paywalls, private media, or account-only access.
 
 ## Supported Sites
 

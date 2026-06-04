@@ -4,6 +4,7 @@ import glob
 import json
 import subprocess
 import threading
+from urllib.parse import urlparse
 from flask import Flask, request, jsonify, send_file, render_template
 
 app = Flask(__name__)
@@ -12,27 +13,147 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 jobs = {}
 
+DESKTOP_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/125.0.0.0 Safari/537.36"
+)
+MOBILE_UA = (
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) "
+    "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+    "Version/17.5 Mobile/15E148 Safari/604.1"
+)
+STRATEGIES = {"auto", "default", "browser", "mobile", "referer", "impersonate"}
+AUTO_STRATEGIES = ("default", "browser", "mobile", "referer", "impersonate")
 
-def run_download(job_id, url, format_choice, format_id):
-    job = jobs[job_id]
-    out_template = os.path.join(DOWNLOAD_DIR, f"{job_id}.%(ext)s")
 
-    cmd = ["yt-dlp", "--no-playlist", "-o", out_template]
+def origin_for(url):
+    parsed = urlparse(url)
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}/"
+    return ""
 
+
+def error_tail(stderr):
+    lines = [line.strip() for line in (stderr or "").splitlines() if line.strip()]
+    return lines[-1] if lines else "yt-dlp failed without an error message"
+
+
+def parse_headers(raw_headers):
+    if isinstance(raw_headers, list):
+        lines = [str(item) for item in raw_headers]
+    else:
+        lines = str(raw_headers or "").splitlines()
+
+    headers = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        if len(headers) >= 12:
+            raise ValueError("Too many custom headers (max 12)")
+        if ":" not in line:
+            raise ValueError(f"Header must use 'Name: value': {line[:40]}")
+        name, value = line.split(":", 1)
+        name = name.strip()
+        value = value.strip()
+        if not name or any(c not in "!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz" for c in name):
+            raise ValueError(f"Invalid header name: {name[:40]}")
+        if "\r" in value or "\n" in value or len(value) > 500:
+            raise ValueError(f"Invalid header value for {name}")
+        headers.append((name, value))
+    return headers
+
+
+def request_options(data):
+    strategy = str(data.get("strategy") or "default").strip().lower()
+    if strategy not in STRATEGIES:
+        raise ValueError(f"Unknown strategy: {strategy}")
+    return {
+        "strategy": strategy,
+        "headers": parse_headers(data.get("headers", "")),
+    }
+
+
+def strategy_flags(strategy, url, custom_headers):
+    headers = []
+    if strategy == "browser":
+        headers += [
+            ("User-Agent", DESKTOP_UA),
+            ("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"),
+            ("Accept-Language", "en-US,en;q=0.9"),
+        ]
+    elif strategy == "mobile":
+        headers += [
+            ("User-Agent", MOBILE_UA),
+            ("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"),
+            ("Accept-Language", "en-US,en;q=0.9"),
+        ]
+    elif strategy == "referer":
+        headers += [
+            ("User-Agent", DESKTOP_UA),
+            ("Accept-Language", "en-US,en;q=0.9"),
+        ]
+        origin = origin_for(url)
+        if origin:
+            headers.append(("Referer", origin))
+
+    headers += custom_headers
+
+    flags = []
+    if strategy == "impersonate":
+        flags += ["--impersonate", "chrome"]
+    for name, value in headers:
+        flags += ["--add-headers", f"{name}:{value}"]
+    return flags
+
+
+def strategies_to_try(options):
+    strategy = options["strategy"]
+    return AUTO_STRATEGIES if strategy == "auto" else (strategy,)
+
+
+def build_info_cmd(url, strategy, custom_headers):
+    return ["yt-dlp", "--no-playlist"] + strategy_flags(strategy, url, custom_headers) + ["-j", url]
+
+
+def build_download_cmd(url, out_template, format_choice, format_id, strategy, custom_headers):
+    cmd = ["yt-dlp", "--no-playlist"] + strategy_flags(strategy, url, custom_headers) + ["-o", out_template]
     if format_choice == "audio":
         cmd += ["-x", "--audio-format", "mp3"]
     elif format_id:
         cmd += ["-f", f"{format_id}+bestaudio/best", "--merge-output-format", "mp4"]
     else:
         cmd += ["-f", "bestvideo+bestaudio/best", "--merge-output-format", "mp4"]
-
     cmd.append(url)
+    return cmd
+
+
+def clean_job_files(job_id):
+    for path in glob.glob(os.path.join(DOWNLOAD_DIR, f"{job_id}.*")):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def run_download(job_id, url, format_choice, format_id, options):
+    job = jobs[job_id]
+    out_template = os.path.join(DOWNLOAD_DIR, f"{job_id}.%(ext)s")
+    attempts = []
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        if result.returncode != 0:
+        for strategy in strategies_to_try(options):
+            clean_job_files(job_id)
+            job["strategy"] = strategy
+            cmd = build_download_cmd(url, out_template, format_choice, format_id, strategy, options["headers"])
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            if result.returncode == 0:
+                break
+            attempts.append(f"{strategy}: {error_tail(result.stderr)}")
+        else:
             job["status"] = "error"
-            job["error"] = result.stderr.strip().split("\n")[-1]
+            job["error"] = "All strategies failed. " + " | ".join(attempts)
             return
 
         files = glob.glob(os.path.join(DOWNLOAD_DIR, f"{job_id}.*"))
@@ -80,16 +201,22 @@ def index():
 
 @app.route("/api/info", methods=["POST"])
 def get_info():
-    data = request.json
+    data = request.get_json(silent=True) or {}
     url = data.get("url", "").strip()
     if not url:
         return jsonify({"error": "No URL provided"}), 400
 
-    cmd = ["yt-dlp", "--no-playlist", "-j", url]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        if result.returncode != 0:
-            return jsonify({"error": result.stderr.strip().split("\n")[-1]}), 400
+        options = request_options(data)
+        attempts = []
+        for strategy in strategies_to_try(options):
+            cmd = build_info_cmd(url, strategy, options["headers"])
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            if result.returncode == 0:
+                break
+            attempts.append(f"{strategy}: {error_tail(result.stderr)}")
+        else:
+            return jsonify({"error": "All strategies failed. " + " | ".join(attempts)}), 400
 
         info = json.loads(result.stdout)
 
@@ -117,6 +244,7 @@ def get_info():
             "duration": info.get("duration"),
             "uploader": info.get("uploader", ""),
             "formats": formats,
+            "strategy": strategy,
         })
     except subprocess.TimeoutExpired:
         return jsonify({"error": "Timed out fetching video info"}), 400
@@ -126,7 +254,7 @@ def get_info():
 
 @app.route("/api/download", methods=["POST"])
 def start_download():
-    data = request.json
+    data = request.get_json(silent=True) or {}
     url = data.get("url", "").strip()
     format_choice = data.get("format", "video")
     format_id = data.get("format_id")
@@ -135,14 +263,24 @@ def start_download():
     if not url:
         return jsonify({"error": "No URL provided"}), 400
 
-    job_id = uuid.uuid4().hex[:10]
-    jobs[job_id] = {"status": "downloading", "url": url, "title": title}
+    try:
+        options = request_options(data)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
-    thread = threading.Thread(target=run_download, args=(job_id, url, format_choice, format_id))
+    job_id = uuid.uuid4().hex[:10]
+    jobs[job_id] = {
+        "status": "downloading",
+        "url": url,
+        "title": title,
+        "strategy": options["strategy"],
+    }
+
+    thread = threading.Thread(target=run_download, args=(job_id, url, format_choice, format_id, options))
     thread.daemon = True
     thread.start()
 
-    return jsonify({"job_id": job_id})
+    return jsonify({"job_id": job_id, "strategy": options["strategy"]})
 
 
 @app.route("/api/status/<job_id>")
@@ -154,6 +292,7 @@ def check_status(job_id):
         "status": job["status"],
         "error": job.get("error"),
         "filename": job.get("filename"),
+        "strategy": job.get("strategy"),
     })
 
 
