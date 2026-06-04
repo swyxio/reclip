@@ -113,6 +113,7 @@
 
       <label for="token">Admin token</label>
       <input id="token" type="password" autocomplete="off" placeholder="Bearer token for this console">
+      <div class="hint">Required for every admin action. On this machine it is saved at /Users/swyx/.codex/tmp/reclip-admin-token.txt.</div>
 
       <label for="prompt">Agent request</label>
       <textarea id="prompt" placeholder="Describe the change you want Codex to make to ReClip..."></textarea>
@@ -129,7 +130,7 @@
 
     <section class="card">
       <label>Codex App Server Auth</label>
-      <div id="codex-status" class="hint">Enter admin token to check Codex account status.</div>
+      <div id="codex-status" class="hint">Paste the admin token first to check Codex account status.</div>
       <div class="row">
         <button id="codex-device" class="secondary">Login With ChatGPT Code</button>
         <button id="codex-browser" class="secondary">Login With ChatGPT Browser</button>
@@ -167,12 +168,30 @@
     let accountTimer = null;
 
     tokenInput.value = localStorage.getItem('reclipAdminToken') || '';
-    tokenInput.addEventListener('input', () => localStorage.setItem('reclipAdminToken', tokenInput.value));
+    tokenInput.addEventListener('input', () => {
+      localStorage.setItem('reclipAdminToken', tokenInput.value);
+      setActionAvailability();
+    });
+
+    function hasToken() {
+      return tokenInput.value.trim().length > 0;
+    }
+
+    function setActionAvailability() {
+      const enabled = hasToken();
+      codexDevice.disabled = !enabled;
+      codexBrowser.disabled = !enabled;
+      codexLogout.disabled = !enabled;
+      if (!enabled) {
+        codexStatus.textContent = 'Paste the admin token first to check Codex account status.';
+        codexLogin.textContent = 'Admin token is required before starting ChatGPT login.';
+      }
+    }
 
     function headers() {
       return {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${tokenInput.value}`,
+        'Authorization': `Bearer ${tokenInput.value.trim()}`,
       };
     }
 
@@ -193,6 +212,9 @@
     }
 
     async function api(path, options = {}) {
+      if (!hasToken()) {
+        throw new Error('Paste the admin token before using admin actions.');
+      }
       const response = await fetch(path, { ...options, headers: { ...headers(), ...(options.headers || {}) } });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || `Request failed: ${response.status}`);
@@ -218,7 +240,8 @@
     }
 
     async function refreshCodexAccount() {
-      if (!tokenInput.value) return;
+      setActionAvailability();
+      if (!hasToken()) return;
       try {
         renderCodexAccount(await api('/api/admin/codex/account'));
       } catch (error) {
@@ -301,6 +324,7 @@
     });
 
     tokenInput.addEventListener('change', refreshCodexAccount);
+    setActionAvailability();
     refreshCodexAccount();
 
     approveButton.addEventListener('click', async () => {
