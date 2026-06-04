@@ -45,7 +45,7 @@ docker build -t reclip . && docker run -p 8899:8899 reclip
 4. Select quality/resolution if available
 5. Click **Download** on individual videos, or **Download All**
 
-If a site returns 403/access-denied for generic server requests, open **Advanced request strategy** and try **Auto**, browser/mobile headers, same-site referer, Chrome TLS impersonation, or custom `Header: value` lines. You can also click **Use my browser profile** to fill headers from your current browser's user agent, language, and Client Hints. These options only tune request metadata; they do not bypass DRM, paywalls, private media, or account-only access.
+If a site returns 403/access-denied for generic server requests, open **Advanced request strategy** and try **Auto**, browser/mobile headers, same-site referer, Chrome TLS impersonation, Cloudflare/generic impersonation, or custom `Header: value` lines. You can also click **Use my browser profile** to fill headers from your current browser's user agent, language, and Client Hints. Cloudflare challenges may still require a real solved browser-session cookie, such as `Cookie: cf_clearance=...`. These options only tune request metadata; they do not bypass DRM, paywalls, private media, or account-only access.
 
 ## Supported Sites
 

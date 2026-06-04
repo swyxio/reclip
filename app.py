@@ -23,8 +23,8 @@ MOBILE_UA = (
     "AppleWebKit/605.1.15 (KHTML, like Gecko) "
     "Version/17.5 Mobile/15E148 Safari/604.1"
 )
-STRATEGIES = {"auto", "default", "browser", "mobile", "referer", "impersonate"}
-AUTO_STRATEGIES = ("default", "browser", "mobile", "referer", "impersonate")
+STRATEGIES = {"auto", "default", "browser", "mobile", "referer", "impersonate", "cloudflare"}
+AUTO_STRATEGIES = ("default", "browser", "mobile", "referer", "cloudflare", "impersonate")
 
 
 def origin_for(url):
@@ -50,8 +50,8 @@ def parse_headers(raw_headers):
         line = line.strip()
         if not line:
             continue
-        if len(headers) >= 12:
-            raise ValueError("Too many custom headers (max 12)")
+        if len(headers) >= 16:
+            raise ValueError("Too many custom headers (max 16)")
         if ":" not in line:
             raise ValueError(f"Header must use 'Name: value': {line[:40]}")
         name, value = line.split(":", 1)
@@ -59,7 +59,8 @@ def parse_headers(raw_headers):
         value = value.strip()
         if not name or any(c not in "!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz" for c in name):
             raise ValueError(f"Invalid header name: {name[:40]}")
-        if "\r" in value or "\n" in value or len(value) > 500:
+        max_len = 4096 if name.lower() == "cookie" else 500
+        if "\r" in value or "\n" in value or len(value) > max_len:
             raise ValueError(f"Invalid header value for {name}")
         headers.append((name, value))
     return headers
@@ -89,9 +90,10 @@ def strategy_flags(strategy, url, custom_headers):
             ("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"),
             ("Accept-Language", "en-US,en;q=0.9"),
         ]
-    elif strategy == "referer":
+    elif strategy in {"referer", "cloudflare"}:
         headers += [
             ("User-Agent", DESKTOP_UA),
+            ("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"),
             ("Accept-Language", "en-US,en;q=0.9"),
         ]
         origin = origin_for(url)
@@ -103,6 +105,8 @@ def strategy_flags(strategy, url, custom_headers):
     flags = []
     if strategy == "impersonate":
         flags += ["--impersonate", "chrome"]
+    elif strategy == "cloudflare":
+        flags += ["--impersonate", "chrome", "--extractor-args", "generic:impersonate=chrome"]
     for name, value in headers:
         flags += ["--add-headers", f"{name}:{value}"]
     return flags

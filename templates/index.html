@@ -534,11 +534,12 @@
             <option value="mobile">Mobile browser headers</option>
             <option value="referer">Same-site referer</option>
             <option value="impersonate">Chrome TLS impersonation</option>
+            <option value="cloudflare">Cloudflare/generic impersonation</option>
           </select>
         </label>
         <label>
           <span class="field-label">Custom headers</span>
-          <textarea class="headers-input" id="headers" rows="3" placeholder="Referer: https://example.com/&#10;Origin: https://example.com"></textarea>
+          <textarea class="headers-input" id="headers" rows="3" placeholder="Referer: https://example.com/&#10;Origin: https://example.com&#10;Cookie: cf_clearance=..."></textarea>
         </label>
         <div class="profile-actions">
           <button class="profile-btn" type="button" onclick="captureBrowserProfile()">Use my browser profile</button>
@@ -549,7 +550,7 @@
           <span>Include experimental high-entropy Client Hints. Leave off unless the target is checking exact browser version/platform details.</span>
         </label>
         <div class="profile-preview" id="profilePreview"></div>
-        <p class="advanced-hint">Use this for sites that reject generic server requests. It will not bypass DRM, paywalls, private media, or account-only access.</p>
+        <p class="advanced-hint">Use this for sites that reject generic server requests. Cloudflare challenges may still require a real solved browser session cookie, such as `cf_clearance`. It will not bypass DRM, paywalls, private media, or account-only access.</p>
       </div>
     </details>
 
@@ -592,6 +593,8 @@
 
     function friendlyError(err) {
       if (!err) return 'Unknown error';
+      if (err.includes('Cloudflare anti-bot challenge')) return 'Blocked by Cloudflare anti-bot challenge';
+      if (err.includes('generic:impersonate')) return 'Try Cloudflare/generic impersonation or a solved browser cookie';
       if (err.includes('All strategies failed')) return 'All request strategies failed';
       if (err.includes('Unsupported URL')) return 'This URL is not supported';
       if (err.includes('Video unavailable')) return 'Video is unavailable or private';
