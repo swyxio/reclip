@@ -48,6 +48,11 @@ Required environment variables:
 ADMIN_TOKEN=choose-a-long-random-token
 GITHUB_TOKEN=github-token-with-contents-write-and-pull-request-access
 GITHUB_REPO=swyxio/reclip
+```
+
+For Codex authentication, open `/admin` and use **Login With ChatGPT Code**. ReClip talks to `codex app-server` and persists the ChatGPT login in `CODEX_HOME` for later agent jobs. You can still use environment credentials instead if you prefer:
+
+```bash
 OPENAI_API_KEY=...
 # or CODEX_API_KEY=...
 # or CODEX_ACCESS_TOKEN=...
@@ -57,13 +62,14 @@ Optional environment variables:
 
 ```bash
 GITHUB_BASE_BRANCH=main
+CODEX_HOME=/tmp/reclip-codex-home
 CODEX_MODEL=...
 CODEX_REASONING_EFFORT=medium
 AGENT_TIMEOUT_SECONDS=900
 MAX_ACTIVE_AGENT_JOBS=1
 ```
 
-The console does not expose a raw shell. It clones the configured GitHub repo into a temp directory, runs Codex with `workspace-write` sandboxing and no network access for the agent, allowlists changed paths, then pushes a branch and opens a PR after admin approval. Do not commit these tokens to the repo; configure them in your host or Railway service variables.
+The console does not expose a raw shell. It clones the configured GitHub repo into a temp directory, runs Codex with `workspace-write` sandboxing and no network access for the agent, allowlists changed paths, then pushes a branch and opens a PR after admin approval. Do not commit tokens to the repo; configure them in your host or Railway service variables.
 
 ## Usage
 

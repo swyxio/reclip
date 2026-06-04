@@ -107,7 +107,7 @@
       <div>
         <span class="pill {{ 'ok' if configured.adminToken else 'bad' }}">ADMIN_TOKEN {{ 'set' if configured.adminToken else 'missing' }}</span>
         <span class="pill {{ 'ok' if configured.githubToken else 'bad' }}">GITHUB_TOKEN {{ 'set' if configured.githubToken else 'missing' }}</span>
-        <span class="pill {{ 'ok' if configured.codexCredential else 'bad' }}">Codex credential {{ 'set' if configured.codexCredential else 'missing' }}</span>
+        <span id="codex-pill" class="pill {{ 'ok' if configured.codexCredential else 'bad' }}">Codex {{ 'ready' if configured.codexCredential else 'not signed in' }}</span>
         <span class="pill">Repo {{ configured.githubRepo }}</span>
       </div>
 
@@ -128,6 +128,17 @@
     </section>
 
     <section class="card">
+      <label>Codex App Server Auth</label>
+      <div id="codex-status" class="hint">Enter admin token to check Codex account status.</div>
+      <div class="row">
+        <button id="codex-device" class="secondary">Login With ChatGPT Code</button>
+        <button id="codex-browser" class="secondary">Login With ChatGPT Browser</button>
+        <button id="codex-logout" class="secondary">Logout Codex</button>
+      </div>
+      <pre id="codex-login">No Codex login flow started.</pre>
+    </section>
+
+    <section class="card">
       <label>Job Log</label>
       <pre id="log">No job yet.</pre>
 
@@ -145,8 +156,15 @@
     const statusEl = document.getElementById('status');
     const logEl = document.getElementById('log');
     const diffEl = document.getElementById('diff');
+    const codexPill = document.getElementById('codex-pill');
+    const codexStatus = document.getElementById('codex-status');
+    const codexLogin = document.getElementById('codex-login');
+    const codexDevice = document.getElementById('codex-device');
+    const codexBrowser = document.getElementById('codex-browser');
+    const codexLogout = document.getElementById('codex-logout');
     let activeJobId = null;
     let pollTimer = null;
+    let accountTimer = null;
 
     tokenInput.value = localStorage.getItem('reclipAdminToken') || '';
     tokenInput.addEventListener('input', () => localStorage.setItem('reclipAdminToken', tokenInput.value));
@@ -179,6 +197,33 @@
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || `Request failed: ${response.status}`);
       return data;
+    }
+
+    function renderCodexAccount(data) {
+      const account = data.account;
+      const ready = Boolean(account || data.hasEnvCredential || data.hasAuthFile);
+      codexPill.className = `pill ${ready ? 'ok' : 'bad'}`;
+      codexPill.textContent = ready ? 'Codex ready' : 'Codex not signed in';
+      if (account?.type === 'chatgpt') {
+        codexStatus.textContent = `Signed in with ChatGPT as ${account.email || 'unknown'} (${account.planType || 'unknown plan'}).`;
+      } else if (account?.type) {
+        codexStatus.textContent = `Signed in with ${account.type}.`;
+      } else if (data.hasEnvCredential) {
+        codexStatus.textContent = 'Codex credential is configured from environment.';
+      } else if (data.hasAuthFile) {
+        codexStatus.textContent = 'Codex auth file exists; account details are not loaded yet.';
+      } else {
+        codexStatus.textContent = 'Codex is not signed in. Use a ChatGPT login flow below.';
+      }
+    }
+
+    async function refreshCodexAccount() {
+      if (!tokenInput.value) return;
+      try {
+        renderCodexAccount(await api('/api/admin/codex/account'));
+      } catch (error) {
+        codexStatus.textContent = error.message;
+      }
     }
 
     async function pollJob() {
@@ -214,6 +259,49 @@
         runButton.disabled = false;
       }
     });
+
+    codexDevice.addEventListener('click', async () => {
+      codexLogin.textContent = 'Starting ChatGPT device-code login...';
+      try {
+        const data = await api('/api/admin/codex/login', {
+          method: 'POST',
+          body: JSON.stringify({ type: 'chatgptDeviceCode' }),
+        });
+        codexLogin.innerHTML = `Open: <a href="${data.verificationUrl}" target="_blank" rel="noreferrer">${data.verificationUrl}</a>\nCode: ${data.userCode}\n\nAfter approval, this page will detect the signed-in account.`;
+        if (!accountTimer) accountTimer = setInterval(refreshCodexAccount, 3000);
+      } catch (error) {
+        codexLogin.textContent = error.stack || error.message;
+      }
+    });
+
+    codexBrowser.addEventListener('click', async () => {
+      codexLogin.textContent = 'Starting ChatGPT browser login...';
+      try {
+        const data = await api('/api/admin/codex/login', {
+          method: 'POST',
+          body: JSON.stringify({ type: 'chatgpt' }),
+        });
+        codexLogin.innerHTML = `Open: <a href="${data.authUrl}" target="_blank" rel="noreferrer">${data.authUrl}</a>\n\nThis works when the callback URL is reachable from your browser. For hosted Railway, device-code login is usually more reliable.`;
+        window.open(data.authUrl, '_blank', 'noopener,noreferrer');
+        if (!accountTimer) accountTimer = setInterval(refreshCodexAccount, 3000);
+      } catch (error) {
+        codexLogin.textContent = error.stack || error.message;
+      }
+    });
+
+    codexLogout.addEventListener('click', async () => {
+      codexLogin.textContent = 'Logging out Codex...';
+      try {
+        await api('/api/admin/codex/logout', { method: 'POST' });
+        codexLogin.textContent = 'Codex logged out.';
+        await refreshCodexAccount();
+      } catch (error) {
+        codexLogin.textContent = error.stack || error.message;
+      }
+    });
+
+    tokenInput.addEventListener('change', refreshCodexAccount);
+    refreshCodexAccount();
 
     approveButton.addEventListener('click', async () => {
       if (!activeJobId) return;

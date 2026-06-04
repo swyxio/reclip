@@ -7,6 +7,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from queue import Empty, Queue
 
 import requests
 from flask import Blueprint, Response, jsonify, render_template, request
@@ -30,6 +31,8 @@ ALLOWED_PATHS = (
 DENIED_PATH_PARTS = (".env", ".pem", ".key", "downloads/", "__pycache__/")
 MAX_DIFF_BYTES = 500_000
 JOBS = {}
+APP_SERVER = None
+APP_SERVER_LOCK = threading.Lock()
 
 
 def now():
@@ -41,6 +44,14 @@ def required_env(name):
     if not value:
         raise RuntimeError(f"Missing required env var: {name}")
     return value
+
+
+def shared_codex_home():
+    return os.environ.get("CODEX_HOME", os.environ.get("AGENT_CODEX_HOME", "/tmp/reclip-codex-home"))
+
+
+def codex_auth_file_exists():
+    return Path(shared_codex_home(), "auth.json").exists()
 
 
 def admin_token():
@@ -110,16 +121,129 @@ def git_env():
 
 
 def codex_env(job_home):
+    codex_home = shared_codex_home()
+    Path(codex_home).mkdir(parents=True, exist_ok=True)
     env = {
         "PATH": os.environ.get("PATH", ""),
-        "HOME": job_home,
-        "CODEX_HOME": os.path.join(job_home, ".codex"),
+        "HOME": os.path.dirname(codex_home) or job_home,
+        "CODEX_HOME": codex_home,
     }
     for name in ("CODEX_ACCESS_TOKEN", "CODEX_API_KEY", "OPENAI_API_KEY"):
         value = os.environ.get(name)
         if value:
             env[name] = value
     return env
+
+
+def codex_app_server_command():
+    local_cli = Path(__file__).with_name("node_modules") / ".bin" / "codex"
+    if local_cli.exists():
+        return [str(local_cli), "app-server"]
+    return ["codex", "app-server"]
+
+
+class CodexAppServerClient:
+    def __init__(self):
+        self.proc = None
+        self.next_id = 1
+        self.pending = {}
+        self.notifications = []
+        self.lock = threading.Lock()
+
+    def ensure_started(self):
+        with self.lock:
+            if self.proc and self.proc.poll() is None:
+                return
+            codex_home = shared_codex_home()
+            Path(codex_home).mkdir(parents=True, exist_ok=True)
+            env = os.environ.copy()
+            env["CODEX_HOME"] = codex_home
+            env["HOME"] = os.path.dirname(codex_home) or env.get("HOME", "/tmp")
+            env["PATH"] = f"{Path(__file__).with_name('node_modules') / '.bin'}:{env.get('PATH', '')}"
+            self.pending = {}
+            self.proc = subprocess.Popen(
+                codex_app_server_command(),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=env,
+                cwd=Path(__file__).parent,
+                bufsize=1,
+            )
+            threading.Thread(target=self._read_stdout, daemon=True).start()
+            threading.Thread(target=self._read_stderr, daemon=True).start()
+
+        self.request("initialize", {
+            "clientInfo": {
+                "name": "reclip_admin_console",
+                "title": "ReClip Admin Console",
+                "version": "0.1.0",
+            },
+            "capabilities": {"experimentalApi": True},
+        })
+        self.notify("initialized", {})
+
+    def _read_stdout(self):
+        for line in self.proc.stdout:
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError:
+                self.notifications.append({"method": "stdout", "params": line.strip()})
+                continue
+            if "id" in message:
+                queue = self.pending.pop(message["id"], None)
+                if queue:
+                    queue.put(message)
+            else:
+                self.notifications.append(message)
+
+    def _read_stderr(self):
+        for line in self.proc.stderr:
+            line = line.strip()
+            if line:
+                self.notifications.append({"method": "stderr", "params": redact(line)})
+
+    def request(self, method, params=None, timeout=30):
+        self.ensure_started_for_request(method)
+        with self.lock:
+            request_id = self.next_id
+            self.next_id += 1
+            queue = Queue(maxsize=1)
+            self.pending[request_id] = queue
+            message = {"method": method, "id": request_id}
+            if params is not None:
+                message["params"] = params
+            self.proc.stdin.write(json.dumps(message) + "\n")
+            self.proc.stdin.flush()
+        try:
+            response = queue.get(timeout=timeout)
+        except Empty as exc:
+            self.pending.pop(request_id, None)
+            raise RuntimeError(f"Timed out waiting for Codex app-server response to {method}") from exc
+        if "error" in response:
+            raise RuntimeError(response["error"].get("message", str(response["error"])))
+        return response.get("result")
+
+    def ensure_started_for_request(self, method):
+        if method != "initialize":
+            self.ensure_started()
+
+    def notify(self, method, params=None):
+        with self.lock:
+            message = {"method": method}
+            if params is not None:
+                message["params"] = params
+            self.proc.stdin.write(json.dumps(message) + "\n")
+            self.proc.stdin.flush()
+
+
+def codex_app_server():
+    global APP_SERVER
+    with APP_SERVER_LOCK:
+        if APP_SERVER is None:
+            APP_SERVER = CodexAppServerClient()
+        return APP_SERVER
 
 
 def workspace_root(job):
@@ -190,8 +314,13 @@ def run_agent_job(job_id):
     try:
         repo = os.environ.get("GITHUB_REPO", REPO_DEFAULT)
         required_env("GITHUB_TOKEN")
-        if not (os.environ.get("CODEX_ACCESS_TOKEN") or os.environ.get("CODEX_API_KEY") or os.environ.get("OPENAI_API_KEY")):
-            raise RuntimeError("Set CODEX_ACCESS_TOKEN, CODEX_API_KEY, or OPENAI_API_KEY before running agent jobs")
+        if not (
+            os.environ.get("CODEX_ACCESS_TOKEN")
+            or os.environ.get("CODEX_API_KEY")
+            or os.environ.get("OPENAI_API_KEY")
+            or codex_auth_file_exists()
+        ):
+            raise RuntimeError("Log in with ChatGPT from /admin or set CODEX_ACCESS_TOKEN, CODEX_API_KEY, or OPENAI_API_KEY before running agent jobs")
 
         job["status"] = "running"
         add_log(job, "Creating temporary checkout")
@@ -244,10 +373,59 @@ def admin_page():
     configured = {
         "adminToken": bool(admin_token()),
         "githubToken": bool(os.environ.get("GITHUB_TOKEN")),
-        "codexCredential": bool(os.environ.get("CODEX_ACCESS_TOKEN") or os.environ.get("CODEX_API_KEY") or os.environ.get("OPENAI_API_KEY")),
+        "codexCredential": bool(os.environ.get("CODEX_ACCESS_TOKEN") or os.environ.get("CODEX_API_KEY") or os.environ.get("OPENAI_API_KEY") or codex_auth_file_exists()),
         "githubRepo": os.environ.get("GITHUB_REPO", REPO_DEFAULT),
     }
     return render_template("admin.html", configured=configured)
+
+
+@agent_console.route("/api/admin/codex/account")
+def codex_account():
+    auth_error = require_admin()
+    if auth_error:
+        return auth_error
+    try:
+        result = codex_app_server().request("account/read", {"refreshToken": True}, timeout=30)
+        return jsonify({
+            "account": result.get("account"),
+            "requiresOpenaiAuth": result.get("requiresOpenaiAuth"),
+            "hasAuthFile": codex_auth_file_exists(),
+            "hasEnvCredential": bool(os.environ.get("CODEX_ACCESS_TOKEN") or os.environ.get("CODEX_API_KEY") or os.environ.get("OPENAI_API_KEY")),
+            "notifications": codex_app_server().notifications[-20:],
+        })
+    except Exception as exc:
+        return jsonify({"error": redact(str(exc))}), 500
+
+
+@agent_console.route("/api/admin/codex/login", methods=["POST"])
+def codex_login():
+    auth_error = require_admin()
+    if auth_error:
+        return auth_error
+    data = request.get_json(silent=True) or {}
+    login_type = str(data.get("type") or "chatgptDeviceCode")
+    if login_type not in {"chatgpt", "chatgptDeviceCode"}:
+        return jsonify({"error": "Login type must be chatgpt or chatgptDeviceCode"}), 400
+    try:
+        params = {"type": login_type}
+        if login_type == "chatgpt":
+            params["codexStreamlinedLogin"] = True
+        result = codex_app_server().request("account/login/start", params, timeout=30)
+        return jsonify(result)
+    except Exception as exc:
+        return jsonify({"error": redact(str(exc))}), 500
+
+
+@agent_console.route("/api/admin/codex/logout", methods=["POST"])
+def codex_logout():
+    auth_error = require_admin()
+    if auth_error:
+        return auth_error
+    try:
+        result = codex_app_server().request("account/logout", None, timeout=30)
+        return jsonify(result or {"ok": True})
+    except Exception as exc:
+        return jsonify({"error": redact(str(exc))}), 500
 
 
 @agent_console.route("/api/admin/jobs", methods=["POST"])
