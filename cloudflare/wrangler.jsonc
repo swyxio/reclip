@@ -1,0 +1,12 @@
+{
+ "name":"reclip-cloudflare-preview",
+ "account_id":"2d017c943ff16e4c52783635ef05e535",
+ "main":"worker.js",
+ "compatibility_date":"2026-10-21",
+ "assets":{"directory":"./public","binding":"ASSETS","run_worker_first":true},
+ "containers":[{"class_name":"Downloader","image":"./Dockerfile","instance_type":"standard-2","max_instances":4}],
+ "durable_objects":{"bindings":[{"name":"DOWNLOADERS","class_name":"Downloader"}]},
+ "migrations":[{"tag":"v1","new_sqlite_classes":["Downloader"]}],
+ "workflows":[{"name":"reclip-preview-jobs","binding":"JOBS","class_name":"DownloadJob"}],
+ "r2_buckets":[{"binding":"FILES","bucket_name":"reclip-preview-downloads"}]
+}

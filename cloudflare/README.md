@@ -1,0 +1,9 @@
+# Cloudflare preview
+
+This is an isolated, authenticated preview. The existing Railway app remains the production and rollback target. The preview does not include the Railway admin console, and non-YouTube extractors have not been fully validated.
+
+The Worker creates a Workflow for each download. Inputs are kept in a private R2 object and removed once the container accepts them; the preview bucket's lifecycle expires remaining inputs and downloaded files after one day (deletion can be delayed). Workflow history carries the job ID rather than the request headers. A per-job container downloads and validates media and uploads it in 8 MiB R2 multipart chunks. File downloads support byte ranges. The instance limit is four; the bulk UI runs at most three jobs at once. yt-dlp requests up to four concurrent fragments for supported DASH/HLS formats. The preview caps output at 4 GB, reserves 512 MiB of disk headroom and stops jobs after two hours.
+
+The preview is protected by HTTP Basic authentication; the username is `reclip` and the password is the `PREVIEW_TOKEN` Worker secret. Do not use this preview as a public downloader: it allows user-provided URLs and custom headers to reach the container. Production release still needs public-facing egress controls, abuse limits, recovery tests, full extractor compatibility, and browser verification. File links expire with the bucket lifecycle, and a lost container can fail an in-progress download.
+
+From this directory, install with `pnpm install --frozen-lockfile` and deploy with `pnpm exec wrangler deploy`. Docker must be running; make sure the intended Cloudflare account, R2 bucket, Workflow, and container configuration are selected. Set `PREVIEW_TOKEN` through `wrangler secret put`; never commit it. When deploying elsewhere, create a private bucket and its expiration and incomplete-multipart lifecycle rules before enabling uploads.

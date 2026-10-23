@@ -9,3 +9,5 @@ assets/*.mov
 .env.local
 .env.production
 .env.development
+
+.wrangler/
