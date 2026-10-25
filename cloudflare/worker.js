@@ -1,6 +1,7 @@
 import { Container, ContainerProxy } from '@cloudflare/containers';
-import { WorkflowEntrypoint } from 'cloudflare:workers';
+import { WorkerEntrypoint, WorkflowEntrypoint } from 'cloudflare:workers';
 import { validateMutationRequest } from './request-security.mjs';
+import { isPrivateApiRequest } from './private-api.mjs';
 export { ContainerProxy };
 
 export class Downloader extends Container {
@@ -88,7 +89,22 @@ function validInput(data) {
   } catch {return false;}
 }
 
-export default {
+// This named entrypoint can only be called through a service binding. It does
+// not expose the preview password to the caller or to a browser.
+export class PrivateApi extends WorkerEntrypoint {
+  async fetch(request) {
+    if (!isPrivateApiRequest(request)) return new Response('Not found', {status:404});
+    if (!this.env.PREVIEW_TOKEN) return new Response('Downloader unavailable', {status:503});
+    const headers = new Headers({authorization:`Bearer ${this.env.PREVIEW_TOKEN}`});
+    for (const name of ['content-type', 'range']) {
+      const value = request.headers.get(name);
+      if (value) headers.set(name, value);
+    }
+    return app.fetch(new Request(request, {headers}), this.env);
+  }
+}
+
+const app = {
   async fetch(request, env) {
     const url = new URL(request.url);
     const auth = request.headers.get('Authorization');
@@ -150,3 +166,4 @@ export default {
     return env.ASSETS.fetch(request);
   }
 };
+export default app;
