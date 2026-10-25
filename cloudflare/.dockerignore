@@ -1,0 +1,9 @@
+node_modules
+.wrangler
+public
+*.json
+*.yaml
+*.js
+.env*
+*.token
+__pycache__
