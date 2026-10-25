@@ -1,5 +1,6 @@
 import { Container, ContainerProxy } from '@cloudflare/containers';
 import { WorkflowEntrypoint } from 'cloudflare:workers';
+import { validateMutationRequest } from './request-security.mjs';
 export { ContainerProxy };
 
 export class Downloader extends Container {
@@ -95,6 +96,8 @@ export default {
       return new Response('Authentication required', {status:401, headers:{'WWW-Authenticate':'Basic realm="ReClip preview", charset="UTF-8"','Cache-Control':'no-store'}});
     }
     if (request.method === 'POST' && ['/api/info','/api/download'].includes(url.pathname)) {
+      const rejection = validateMutationRequest(request);
+      if (rejection) return Response.json({error:rejection.error}, {status:rejection.status});
       let input;
       try { input = await request.json(); } catch { return Response.json({error:'Invalid JSON'},{status:400}); }
       if (!validInput(input)) return Response.json({error:'Invalid URL or request headers'},{status:400});
